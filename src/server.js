@@ -366,6 +366,39 @@ app.patch('/api/v1/expenses/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/v1/expenses/:id - Delete an expense
+app.delete('/api/v1/expenses/:id', async (req, res) => {
+  const expenseId = parseInt(req.params.id, 10);
+  if (isNaN(expenseId) || expenseId <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid expense ID. ID must be a positive integer.'
+    });
+  }
+
+  try {
+    const query = 'DELETE FROM expenses WHERE id = $1 RETURNING id;';
+    const result = await db.query(query, [expenseId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Expense with ID ${expenseId} not found`
+      });
+    }
+
+    // 204 No Content for successful deletion
+    return res.status(204).send();
+  } catch (err) {
+    console.error('Error deleting expense:', err.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while deleting expense',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
 // Start listening if executed directly
 if (require.main === module) {
   app.listen(PORT, () => {
