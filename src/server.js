@@ -202,6 +202,170 @@ app.get('/api/v1/expenses/:id', async (req, res) => {
   }
 });
 
+// PUT /api/v1/expenses/:id - Full update of an expense
+app.put('/api/v1/expenses/:id', async (req, res) => {
+  const expenseId = parseInt(req.params.id, 10);
+  if (isNaN(expenseId) || expenseId <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid expense ID. ID must be a positive integer.'
+    });
+  }
+
+  const { title, amount, category, expense_date, payment_method, status, notes } = req.body;
+
+  if (!title || typeof title !== 'string' || title.trim() === '') {
+    return res.status(400).json({
+      success: false,
+      error: 'Title is required and must be a non-empty string'
+    });
+  }
+
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Amount is required and must be a positive number'
+    });
+  }
+
+  if (!category || typeof category !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'Category is required'
+    });
+  }
+
+  try {
+    const query = `
+      UPDATE expenses
+      SET title = $1,
+          amount = $2,
+          category = $3,
+          expense_date = COALESCE($4, expense_date),
+          payment_method = COALESCE($5, payment_method),
+          status = COALESCE($6, status),
+          notes = $7
+      WHERE id = $8
+      RETURNING *;
+    `;
+    const values = [
+      title.trim(),
+      parsedAmount,
+      category.toLowerCase().trim(),
+      expense_date || null,
+      payment_method ? payment_method.toLowerCase().trim() : null,
+      status ? status.toLowerCase().trim() : null,
+      notes !== undefined ? (notes ? notes.trim() : null) : null,
+      expenseId
+    ];
+
+    const result = await db.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Expense with ID ${expenseId} not found`
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Expense updated successfully',
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating expense with PUT:', err.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while updating expense',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// PATCH /api/v1/expenses/:id - Partial update of an expense
+app.patch('/api/v1/expenses/:id', async (req, res) => {
+  const expenseId = parseInt(req.params.id, 10);
+  if (isNaN(expenseId) || expenseId <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid expense ID. ID must be a positive integer.'
+    });
+  }
+
+  const allowedFields = ['title', 'amount', 'category', 'expense_date', 'payment_method', 'status', 'notes'];
+  const fields = Object.keys(req.body).filter(field => allowedFields.includes(field));
+
+  if (fields.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'At least one valid field must be provided for update'
+    });
+  }
+
+  // Validate specific fields if provided
+  if (req.body.title !== undefined) {
+    if (typeof req.body.title !== 'string' || req.body.title.trim() === '') {
+      return res.status(400).json({ success: false, error: 'Title must be a non-empty string' });
+    }
+  }
+
+  if (req.body.amount !== undefined) {
+    const parsed = parseFloat(req.body.amount);
+    if (isNaN(parsed) || parsed <= 0) {
+      return res.status(400).json({ success: false, error: 'Amount must be a positive number' });
+    }
+  }
+
+  try {
+    const setClauses = [];
+    const values = [];
+
+    fields.forEach((field) => {
+      let val = req.body[field];
+      if (typeof val === 'string') {
+        val = val.trim();
+        if (['category', 'payment_method', 'status'].includes(field)) {
+          val = val.toLowerCase();
+        }
+      }
+      values.push(val);
+      setClauses.push(`${field} = $${values.length}`);
+    });
+
+    values.push(expenseId);
+    const query = `
+      UPDATE expenses
+      SET ${setClauses.join(', ')}
+      WHERE id = $${values.length}
+      RETURNING *;
+    `;
+
+    const result = await db.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Expense with ID ${expenseId} not found`
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Expense partially updated successfully',
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating expense with PATCH:', err.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while updating expense',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
 // Start listening if executed directly
 if (require.main === module) {
   app.listen(PORT, () => {
