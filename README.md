@@ -144,6 +144,14 @@ npm run dev
 npm start
 ```
 
+### 8. Run Automated Integration Tests
+
+Execute the automated end-to-end integration test suite using Node's native test runner:
+
+```bash
+npm test
+```
+
 ---
 
 ## Environment Variables
