@@ -103,6 +103,105 @@ app.post('/api/v1/expenses', async (req, res) => {
   }
 });
 
+// GET /api/v1/expenses - Retrieve all expenses with filtering and pagination
+app.get('/api/v1/expenses', async (req, res) => {
+  try {
+    const { category, status, sortBy = 'created_at', sortOrder = 'DESC' } = req.query;
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const offset = (page - 1) * limit;
+
+    // Allowed sort columns to prevent SQL injection in ORDER BY
+    const allowedSortColumns = ['id', 'amount', 'expense_date', 'created_at', 'title'];
+    const safeSortBy = allowedSortColumns.includes(sortBy) ? sortBy : 'created_at';
+    const safeSortOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    const conditions = [];
+    const values = [];
+
+    if (category) {
+      values.push(category.toLowerCase().trim());
+      conditions.push(`category = $${values.length}`);
+    }
+
+    if (status) {
+      values.push(status.toLowerCase().trim());
+      conditions.push(`status = $${values.length}`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Count query for pagination
+    const countQuery = `SELECT COUNT(*) FROM expenses ${whereClause};`;
+    const countResult = await db.query(countQuery, values);
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    // Data query
+    const dataValues = [...values, limit, offset];
+    const dataQuery = `
+      SELECT * FROM expenses
+      ${whereClause}
+      ORDER BY ${safeSortBy} ${safeSortOrder}
+      LIMIT $${dataValues.length - 1} OFFSET $${dataValues.length};
+    `;
+    const dataResult = await db.query(dataQuery, dataValues);
+
+    return res.status(200).json({
+      success: true,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      },
+      data: dataResult.rows
+    });
+  } catch (err) {
+    console.error('Error fetching expenses:', err.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching expenses',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// GET /api/v1/expenses/:id - Retrieve single expense by ID
+app.get('/api/v1/expenses/:id', async (req, res) => {
+  const expenseId = parseInt(req.params.id, 10);
+  if (isNaN(expenseId) || expenseId <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid expense ID. ID must be a positive integer.'
+    });
+  }
+
+  try {
+    const query = 'SELECT * FROM expenses WHERE id = $1;';
+    const result = await db.query(query, [expenseId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `Expense with ID ${expenseId} not found`
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error fetching expense by ID:', err.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching expense',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
 // Start listening if executed directly
 if (require.main === module) {
   app.listen(PORT, () => {
